@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ECIS Simulation Classifier</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="stylesheet" href="css/styles.css?v=22">
+    <script>
+      // Apply saved theme before first paint to avoid flash
+      (function() {
+        const saved = localStorage.getItem('ecis-theme');
+        if (saved) document.documentElement.setAttribute('data-theme', saved);
+      })();
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark/light mode">&#9728;</button>
+            <h1>ECIS Simulation Classifier</h1>
+            <p>Multi-format Experimental Data Analysis &amp; Fitting</p>
+        </div>
+
+        <div class="tabs" role="tablist">
+            <button class="tab active" id="tab-btn-data"       role="tab" aria-selected="true"  aria-controls="data"       onclick="switchTab('data')">Data Loading</button>
+            <button class="tab"        id="tab-btn-evolution"  role="tab" aria-selected="false" aria-controls="evolution"  onclick="switchTab('evolution')">Evolution Analysis</button>
+            <button class="tab"        id="tab-btn-spectral"   role="tab" aria-selected="false" aria-controls="spectral"   onclick="switchTab('spectral')">Spectral Analysis</button>
+            <button class="tab"        id="tab-btn-fitting"    role="tab" aria-selected="false" aria-controls="fitting"    onclick="switchTab('fitting')">Classification &amp; Fitting</button>
+        </div>
+
+        <!-- DATA LOADING TAB -->
+        <div id="data" class="tab-content active" role="tabpanel" aria-labelledby="tab-btn-data" tabindex="0">
+
+            <!-- Status Message -->
+            <div id="statusMessage"></div>
+
+            <!-- Loaded Data Summary -->
+            <div class="control-panel" id="dataInfo" style="display: none;">
+                <h3>Loaded Data Summary</h3>
+                <div id="dataSummary"></div>
+            </div>
+
+            <!-- Stacked Layout: Data Loading on top, Simulation below -->
+            <div style="display: grid; grid-template-columns: 1fr; gap: 20px;">
+
+                <!-- LEFT COLUMN: Experimental Data -->
+                <div class="data-column-left">
+
+                    <div class="control-panel">
+                        <h3>Raw ECIS Files (.dat)</h3>
+                        <p style="font-size: 12px; color: var(--color-text-secondary); margin-bottom: 10px;">
+                            Files with header (frequencies, channels, measurements) + raw V/Phase data
+                        </p>
+                        <input type="file" id="rawFileInput" multiple accept=".dat,.txt">
+                        <button class="button" onclick="loadRawFiles()">Load Raw Files</button>
+
+                        <div style="margin-top: 10px;">
+                            <label style="font-weight: 600;">File Type:</label>
+                            <select id="fileDataType" style="padding: 5px; margin-left: 10px;" onchange="updateSampleFileLink()">
+                                <option value="magnitude">|Z| only</option>
+                            </select>
+                            <span id="rsInputContainer" style="display: none; margin-left: 15px;">
+                                <label>Load resistance [Ohm]:</label>
+                                <input type="number" id="rsValue" value="100000" step="100" style="width: 80px; padding: 3px;">
+                            </span>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 11px; color: var(--color-text-secondary);">
+                            Sample file for this format:
+                            <a id="sampleFileLink" href="samples/Test_Z.dat" target="_blank"
+                               style="color: var(--color-interactive); font-weight: 600; text-decoration: none;"
+                               title="View sample file">
+                                &#128196; Test_Z.dat
+                            </a>
+                            <span style="color: var(--color-text-disabled); font-style: italic; margin-left: 6px;">MDCK II · W&amp;H · 8 ch · 48 h</span>
+                        </div>
+                        <div style="margin-top: 10px; padding: 10px; background: var(--color-info-bg); border-radius: 5px; border: 1px solid var(--color-info-border);">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="concatenateFiles">
+                                <span style="font-weight: 600;">Concatenate files by date</span>
+                            </label>
+                            <p style="font-size: 11px; color: var(--color-text-secondary); margin: 5px 0 0 24px;">
+                                When enabled, multiple files will be sorted by date and timelines concatenated.
+                            </p>
+                        </div>
+
+                        <!-- Spectrum Quality Filter -->
+                        <div style="margin-top: 10px; padding: 10px; background: var(--color-warning-bg); border-radius: 5px; border: 1px solid var(--color-warning-border);">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="enableSpectrumFilter" onchange="toggleSpectrumFilter()">
+                                <span style="font-weight: 600;">Spectrum quality filter</span>
+                            </label>
+                            <p style="font-size: 11px; color: var(--color-text-secondary); margin: 4px 0 6px 24px;">
+                                Discard sweeps where any point falls outside the set bounds. Leave a field blank to skip that bound.
+                            </p>
+                            <div id="spectrumFilterOptions" style="display: none; margin-left: 24px;">
+
+                                <!-- Column 1 filter (Voltage / |Z| / R) -->
+                                <div style="margin-bottom: 10px; padding: 6px 8px; background: var(--color-warning-bg); border-radius: 4px; border: 1px solid var(--color-warning-border);">
+                                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 5px;">
+                                        Column 1: <span id="filterCol1Label">Voltage</span>
+                                        <span style="font-weight: normal; color: var(--color-text-secondary);">
+                                            (<span id="filterCol1UnitsLabel">V</span>)
+                                        </span>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                        <label style="font-size: 12px;">Min:</label>
+                                        <input type="number" id="filterCol1Min" placeholder="no limit" step="any"
+                                            style="width: 90px; padding: 3px; border: 1px solid var(--color-border); border-radius: 3px;">
+                                        <label style="font-size: 12px;">Max:</label>
+                                        <input type="number" id="filterCol1Max" placeholder="no limit" step="any"
+                                            style="width: 90px; padding: 3px; border: 1px solid var(--color-border); border-radius: 3px;">
+                                        <span id="filterCol1UnitsSuffix" style="font-size: 12px; color: var(--color-text-secondary);">V</span>
+                                    </div>
+                                </div>
+
+                                <!-- Column 2 filter (Phase / Phase / C) -->
+                                <div style="margin-bottom: 8px; padding: 6px 8px; background: var(--color-warning-bg); border-radius: 4px; border: 1px solid var(--color-warning-border);">
+                                    <div style="font-size: 12px; font-weight: 600; margin-bottom: 5px;">
+                                        Column 2: <span id="filterCol2Label">Phase</span>
+                                        <span style="font-weight: normal; color: var(--color-text-secondary);">
+                                            (<span id="filterCol2UnitsLabel">°</span>)
+                                        </span>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                        <label style="font-size: 12px;">Min:</label>
+                                        <input type="number" id="filterCol2Min" placeholder="no limit" step="any"
+                                            style="width: 90px; padding: 3px; border: 1px solid var(--color-border); border-radius: 3px;">
+                                        <label style="font-size: 12px;">Max:</label>
+                                        <input type="number" id="filterCol2Max" placeholder="no limit" step="any"
+                                            style="width: 90px; padding: 3px; border: 1px solid var(--color-border); border-radius: 3px;">
+                                        <span id="filterCol2UnitsSuffix" style="font-size: 12px; color: var(--color-text-secondary);">°</span>
+                                    </div>
+                                </div>
+
+                                <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                                    <p id="filterHint" style="font-size: 11px; color: var(--color-text-secondary); margin: 0; flex: 1;"></p>
+                                    <button onclick="if(experimentalData.raw && experimentalData.raw.length > 0) processRawData();"
+                                            title="Re-apply filter to already-loaded data"
+                                            style="font-size: 11px; padding: 3px 8px; background: var(--color-warning-bg); border: 1px solid var(--color-warning-border); border-radius: 3px; cursor: pointer; white-space: nowrap;">
+                                        &#8634; Re-apply
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Channel Configuration -->
+                    <div class="control-panel" id="channelConfigPanel" style="display: none;">
+                        <h3>Channel Configuration</h3>
+                        <p style="color: var(--color-text-secondary); margin-bottom: 15px;">Name your channels/electrodes for identification:</p>
+                        <div style="margin-bottom:8px; padding:8px; background:var(--color-surface-raised); border-radius:6px; border:1px solid var(--color-border);">
+                          <label><input type="checkbox" id="uniformChannelStyle" onchange="onUniformStyleChange()">
+                            Uniform style for all channels</label>
+                          <span id="uniformStylePanel" style="display:none; margin-left:16px;">
+                            Marker: <select id="uniformMarker" onchange="onUniformStyleChange()">
+                              <option value="circle">&#9679; Circle</option>
+                              <option value="square">&#9632; Square</option>
+                              <option value="diamond">&#9670; Diamond</option>
+                              <option value="triangle-up">&#9650; Triangle</option>
+                              <option value="cross">&#10005; Cross</option>
+                            </select>
+                            &nbsp; Line: <select id="uniformLineStyle" onchange="onUniformStyleChange()">
+                              <option value="solid">&#8212; Solid</option>
+                              <option value="dash">- - Dash</option>
+                              <option value="dot">&#183;&#183;&#183; Dot</option>
+                              <option value="dashdot">-&#183;- Dashdot</option>
+                            </select>
+                          </span>
+                        </div>
+                        <div id="channelConfigContainer" class="channel-config-grid"></div>
+                        <div style="display:flex;align-items:center;gap:12px;margin-top:10px;margin-bottom:6px;flex-wrap:wrap;">
+                            <label style="font-size:13px;color:var(--color-text-primary);">
+                                Marker size:
+                                <input type="number" id="globalMarkerSizeInput" value="6" min="1" max="30" step="1"
+                                    style="width:60px;padding:3px 6px;border:1px solid var(--color-border);border-radius:4px;font-size:13px;"
+                                    oninput="window.globalMarkerSize=parseFloat(this.value)||6; if(typeof updateEvolutionPlots==='function') updateEvolutionPlots(); if(typeof updateSpectralPlots==='function') updateSpectralPlots();">
+                                px
+                            </label>
+                        </div>
+                        <button class="button button-success" onclick="applyChannelNames()">Apply Names</button>
+                        <button class="button" onclick="autoNumberChannels()">Auto-Number</button>
+                    </div>
+
+                </div>
+
+                <!-- RIGHT COLUMN: File-based Simulation Library -->
+                <div class="data-column-right">
+
+                    <!-- Simulation Library File Input Panel -->
+                    <div class="control-panel" style="background: var(--color-info-bg); border: 2px solid var(--color-info-border);">
+                        <h3>Simulation Library</h3>
+                        <p style="font-size: 12px; color: var(--color-text-secondary); margin-bottom: 12px;">
+                            Load simulation files from disk. Supported formats: Z_wh, Z_ran, Z_inf, Z_rup (.txt).
+                            All filtering and classification runs client-side — no server required.
+                        </p>
+
+                        <!-- Status indicator -->
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                            <div id="libConnectIndicator" style="
+                                width: 12px; height: 12px; border-radius: 50%;
+                                background: var(--color-text-disabled); flex-shrink: 0;
+                            "></div>
+                            <span id="libConnectLabel" style="font-size: 13px; color: var(--color-text-secondary);">No files loaded</span>
+                        </div>
+
+                        <input type="file" id="simLibFileInput" multiple accept=".txt,.dat"
+                               style="margin-bottom: 8px;">
+                        <button class="button" id="libLoadBtn" onclick="loadSimulationLibrary()">Load Files</button>
+                    </div>
+
+                    <!-- Overwrite R_constr control -->
+                    <div class="control-panel" style="background: var(--color-warning-bg); border: 1px solid var(--color-warning-border);">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="overwriteRConstr">
+                            <span style="font-weight: 600;">Overwrite Simulation Constriction Value</span>
+                        </label>
+                        <p style="font-size: 11px; color: var(--color-text-secondary); margin: 5px 0 0 0;">
+                            Overrides the parsed R_constr for all simulations. For combined simulations each electrode uses half this value.
+                        </p>
+                        <div id="overwriteRConstrContainer" style="display: none; margin-top: 8px;">
+                            <label>R_constr [&#937;]:</label>
+                            <input type="number" id="overwriteRConstrValue" value="1000" step="100"
+                                   style="width: 120px; padding: 4px; margin-left: 5px;">
+                        </div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- SIMULATION SELECTION PANEL                                   -->
+                    <!-- ============================================================ -->
+                    <div class="control-panel" id="simSelectionPanel" style="display: none; background: var(--color-success-bg); border: 2px solid var(--color-success-border);">
+                        <h3 style="color: var(--color-success);">Simulation Selection</h3>
+                        <p style="font-size: 12px; color: var(--color-text-secondary); margin-bottom: 12px;">
+                            Choose which simulations to load into memory. Once loaded, classification runs
+                            <strong>client-side</strong> against this set. If you skip this step, classification
+                            uses the full loaded library with the type filter in the Classification tab.
+                        </p>
+
+                        <!-- Top two-column grid: Profile (left) + Simulation Type (right) -->
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:10px;">
+
+                            <!-- LEFT: Electrode Profile only -->
+                            <div>
+                                <div id="loadCpeBlock" style="display:none; margin-bottom:10px; padding:10px; background:var(--color-surface); border-radius:6px; border-left:4px solid var(--color-info);">
+                                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+                                        <span style="font-weight:600; color:var(--color-info); font-size:13px;">1. Electrode Profile:</span>
+                                        <button class="help-btn" onclick="openHelp('electrode')" title="Help: Electrode Profile">?</button>
+                                        <button class="button" style="padding:2px 8px;font-size:0.78em;margin:0;" onclick="_profilesSelectAll()">All</button>
+                                        <button class="button" style="padding:2px 8px;font-size:0.78em;margin:0;" onclick="_profilesSelectNone()">None</button>
+                                    </div>
+                                    <div id="loadProfileCards"></div>
+                                </div>
+                            </div><!-- /LEFT -->
+
+                            <!-- RIGHT: Simulation Type only -->
+                            <div>
+                                <div style="margin-bottom:10px; padding:10px; background:var(--color-surface); border-radius:6px; border-left:4px solid var(--color-success);">
+                                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+                                        <span style="font-weight:600; color:var(--color-success); font-size:13px;">2. Simulation Type:</span>
+                                        <button class="button" style="padding:2px 8px;font-size:0.78em;margin:0;" onclick="_loadTypesSelectAll()">All</button>
+                                        <button class="button" style="padding:2px 8px;font-size:0.78em;margin:0;" onclick="_loadTypesSelectNone()">None</button>
+                                    </div>
+                                    <div id="loadTypeChips" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+                                    <!-- Hidden checkboxes — read by loadSimsForClassification() and _updateLoadFiltersForSelectedTypes() -->
+                                    <div style="display:none;">
+                                        <input type="checkbox" id="loadType_wh"  class="load-type" checked>
+                                        <input type="checkbox" id="loadType_ran" class="load-type" checked>
+                                        <input type="checkbox" id="loadType_cov" class="load-type">
+                                        <input type="checkbox" id="loadType_fus" class="load-type">
+                                        <input type="checkbox" id="loadType_inf" class="load-type">
+                                        <input type="checkbox" id="loadType_rup" class="load-type">
+                                        <input type="checkbox" id="loadType_apo" class="load-type" checked>
+                                    </div>
+                                </div>
+                            </div><!-- /RIGHT -->
+                        </div><!-- /top two-column grid -->
+
+                        <!-- 3. Cell Geometry — full width -->
+                        <div id="loadCellGeometryBlock" style="display:none; margin-bottom:10px; padding:10px; background:var(--color-surface); border-radius:6px; border-left:4px solid var(--color-warning);">
+                            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+                                <span style="font-weight:600; color:var(--color-warning); font-size:13px;">3. Cell Geometry:</span>
+                                <button class="help-btn" onclick="openHelp('cellShapes')" title="Help: Cell Geometry">?</button>
+                                <button class="button" style="padding:2px 8px;font-size:0.78em;margin:0;" onclick="_chipsSelectAll('load-filter-cell-shape');_chipsSelectAll('load-filter-hw-ratio')">All</button>
+                                <button class="button" style="padding:2px 8px;font-size:0.78em;margin:0;" onclick="_chipsSelectNone('load-filter-cell-shape');_chipsSelectNone('load-filter-hw-ratio')">None</button>
+                            </div>
+                            <div id="loadCellShapeRow" style="display:none; margin-bottom:6px;">
+                                <div class="gk-param-row">
+                                    <span class="gk-param-label">Shape:</span>
+                                    <div id="loadCellShapeFilters" class="chip-row-container"></div>
+                                </div>
+                            </div>
+                            <div id="loadHwRatioRow" style="display:none;">
+                                <div class="gk-param-row">
+                                    <span class="gk-param-label">H/W Ratio:</span>
+                                    <div id="loadHwRatioFilters" class="chip-row-container"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 4. GK Parameters — full width -->
+                        <div style="margin-bottom:10px; padding:10px; background:var(--color-surface); border-radius:6px; border-left:4px solid var(--color-text-secondary);">
+                            <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+                                <span style="font-weight:600; color:var(--color-text-secondary); font-size:13px;">4. GK Parameters:</span>
+                                <button class="help-btn" onclick="openHelp('gkParams')" title="Help: GK Model Parameters">?</button>
+                                <button class="button" style="padding:2px 8px;font-size:0.78em;margin:0;" onclick="selectAllLoadFilters()">All</button>
+                                <button class="button" style="padding:2px 8px;font-size:0.78em;margin:0;" onclick="deselectAllLoadFilters()">None</button>
+                            </div>
+                            <!-- ac -->
+                            <div class="gk-param-row">
+                                <span class="gk-param-label">Cell Area [µm²]:</span>
+                                <div id="loadAcFilters" class="chip-row-container"></div>
+                            </div>
+                            <!-- alpha -->
+                            <div class="gk-param-row">
+                                <span class="gk-param-label">Alpha [&#x221a;&#x3a9;&#xb7;cm]:</span>
+                                <div id="loadAlphaFilters" class="chip-row-container"></div>
+                            </div>
+                            <!-- rb -->
+                            <div class="gk-param-row">
+                                <span class="gk-param-label">Rb [&#x3a9;&#xb7;cm²]:</span>
+                                <div id="loadRbFilters" class="chip-row-container"></div>
+                            </div>
+                            <!-- cm -->
+                            <div class="gk-param-row">
+                                <span class="gk-param-label">Cm [F/cm²]:</span>
+                                <div id="loadCmFilters" class="chip-row-container"></div>
+                            </div>
+                            <!-- Step chips per type -->
+                            <div id="loadStepWhGroup" style="display:none;" class="gk-param-row">
+                                <span class="gk-param-label" style="color:var(--color-success);">WH Stage:</span>
+                                <div id="loadStepWhFilters" class="chip-row-container"></div>
+                            </div>
+                            <div id="loadStepRanGroup" style="display:none;" class="gk-param-row">
+                                <span class="gk-param-label" style="color:var(--color-text-secondary);">Dead % (Ran):</span>
+                                <div id="loadStepRanFilters" class="chip-row-container"></div>
+                            </div>
+                            <div id="loadStepFusGroup" style="display:none;" class="gk-param-row">
+                                <span class="gk-param-label" style="color:var(--color-error);">Step (Inf/Rup):</span>
+                                <div id="loadStepFusFilters" class="chip-row-container"></div>
+                            </div>
+                        </div>
+
+                        <!-- Live Count Bar -->
+                        <div id="liveCountBar" style="margin-bottom:10px; padding:8px 14px; background:var(--color-success-bg); border-radius:6px; border:1px solid var(--color-success-border); display:none; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <span id="liveCountNum" style="font-size:16px; font-weight:bold; color:var(--color-success);">–</span>
+                            <span style="font-size:12px; color:var(--color-text-secondary);">simulations match current filters</span>
+                            <span id="liveCountSpinner" style="display:none; font-size:13px; color:var(--color-text-secondary); animation:spin 1s linear infinite;">&#8987;</span>
+                        </div>
+
+                        <!-- Combination (optional) -->
+                        <div style="margin-bottom: 10px; padding: 10px; background: var(--color-surface-raised); border-radius: 6px;">
+                            <label style="font-weight: 600; display: block; margin-bottom: 8px; color: var(--color-warning);">Combination (optional):</label>
+                            <p style="font-size: 11px; color: var(--color-text-secondary); margin-bottom: 8px;">
+                                Combine impedances of two simulations (Z = Z&#x2081; + Z&#x2082;) for dual-electrode configurations.
+                                Creates all pairs within each parameter group.
+                            </p>
+                            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer;">
+                                <input type="checkbox" id="enableCombination" onchange="toggleCombinationOptions()">
+                                <span style="font-weight: 600;">Enable combination after loading</span>
+                            </label>
+                            <div id="combinationOptions" style="display: none; padding: 8px; background: var(--color-warning-bg); border-radius: 5px; border: 1px solid var(--color-warning-border);">
+                                <label style="font-size: 12px; font-weight: 600; display: block; margin-bottom: 6px;">Group by parameters:</label>
+                                <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;">
+                                    <label><input type="checkbox" id="combineBy_ac"    class="combine-param" onchange="updateCombinePreview()"> ac</label>
+                                    <label><input type="checkbox" id="combineBy_alpha" checked class="combine-param" onchange="updateCombinePreview()"> alpha</label>
+                                    <label><input type="checkbox" id="combineBy_rb"    checked class="combine-param" onchange="updateCombinePreview()"> Rb</label>
+                                    <label><input type="checkbox" id="combineBy_cm"    checked class="combine-param" onchange="updateCombinePreview()"> Cm</label>
+                                    <label><input type="checkbox" id="combineBy_de"    class="combine-param" onchange="updateCombinePreview()"> Electrode (de)</label>
+                                </div>
+                                <!-- Hidden type checkboxes kept for backward-compat with combination.js -->
+                                <div style="display:none;">
+                                    <input type="checkbox" id="combineType_cov"  class="combine-type">
+                                    <input type="checkbox" id="combineType_fus"  class="combine-type">
+                                    <input type="checkbox" id="combineType_wh"   class="combine-type" checked>
+                                    <input type="checkbox" id="combineType_ran"  class="combine-type" checked>
+                                    <input type="checkbox" id="combineType_inf"  class="combine-type">
+                                    <input type="checkbox" id="combineType_rup"  class="combine-type">
+                                </div>
+                                <div id="combinePreviewDetails" style="font-size: 11px; color: var(--color-text-secondary); min-height: 1em;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Load button + status -->
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px;">
+                            <button class="button button-success" id="loadSimsBtn" onclick="loadSimsForClassification()"
+                                style="background: var(--color-success); color: var(--color-text-on-accent);">
+                                &#11015; Load Simulations
+                            </button>
+                            <button class="button button-secondary" onclick="clearLoadedSims()">Clear</button>
+                            <button class="button button-secondary" onclick="downloadLoadedSimMetadata()"
+                                    id="downloadSimMetaBtn" style="display:none;">&#11015; Download metadata</button>
+                            <span id="loadedSimsStatus" style="font-size: 12px; color: var(--color-text-secondary); padding: 5px 10px; background: var(--color-success-bg); border-radius: 4px; border: 1px solid var(--color-success-border);">
+                                No sims loaded — classification will use all files in memory
+                            </span>
+                        </div>
+                        <!-- Stride-sampling warning: shown when >5000 sims match per type -->
+                        <div id="loadedSimsWarning" style="display:none; margin-top: 6px; padding: 6px 10px; background: var(--color-warning-bg); border: 1px solid var(--color-warning-border); border-radius: 4px; font-size: 11px; color: var(--color-warning); line-height: 1.6;"></div>
+
+                        <!-- Compact preview numbers (shown after load) -->
+                        <div id="combinePreview" style="display:none; margin-top: 8px; padding: 10px; background: var(--color-surface-raised); border-radius: 8px; border: 1px solid var(--color-border);">
+                            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;" id="combinePreviewContent">
+                                <div style="text-align: center; padding: 6px; background: var(--color-surface); border-radius: 5px;">
+                                    <div style="font-size: 18px; font-weight: bold; color: var(--color-info);" id="previewGroups">0</div>
+                                    <div style="font-size: 10px; color: var(--color-text-secondary);">Groups</div>
+                                </div>
+                                <div style="text-align: center; padding: 6px; background: var(--color-surface); border-radius: 5px;">
+                                    <div style="font-size: 18px; font-weight: bold; color: var(--color-success);" id="previewOriginal">0</div>
+                                    <div style="font-size: 10px; color: var(--color-text-secondary);">Original</div>
+                                </div>
+                                <div id="previewCombCard" style="text-align: center; padding: 6px; background: var(--color-surface); border-radius: 5px;">
+                                    <div style="font-size: 18px; font-weight: bold; color: var(--color-warning);" id="previewCombinations">0</div>
+                                    <div style="font-size: 10px; color: var(--color-text-secondary);">New Comb.</div>
+                                </div>
+                                <div id="previewTotalCard" style="text-align: center; padding: 6px; background: var(--color-surface); border-radius: 5px;">
+                                    <div style="font-size: 18px; font-weight: bold; color: var(--color-text-primary);" id="previewTotal">0</div>
+                                    <div style="font-size: 10px; color: var(--color-text-secondary);">Total</div>
+                                </div>
+                            </div>
+                            <span id="combineCountDisplay" style="display:block; margin-top:6px; font-size: 12px; color: var(--color-text-secondary);"></span>
+                        </div>
+                    </div>
+
+                    <!-- Legacy IDs kept for backward compat -->
+                    <div id="combineSimPanel" style="display: none;"></div>
+                    <div id="rangeFiltersPanel" style="display: none;"></div>
+
+                </div>
+
+            </div>
+        </div>
+
+        <!-- EVOLUTION ANALYSIS TAB -->
+        <div id="evolution" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-evolution" tabindex="0">
+            <div class="control-panel">
+                <h3>Evolution Analysis Settings</h3>
+                <div id="evoChannelSelector" style="margin-bottom: 15px;">
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:5px;">
+                        <label style="font-weight: 600;">Select Channels:</label>
+                        <button class="button" style="padding:2px 8px;font-size:0.78em;margin:0;" onclick="selectAllChannels('evolution')">All</button>
+                        <button class="button" style="padding:2px 8px;font-size:0.78em;margin:0;" onclick="deselectAllChannels('evolution')">None</button>
+                    </div>
+                    <div class="channel-tags" id="evoChannelTags"></div>
+                </div>
+                <div class="freq-selectors">
+                    <div><label>|Z| Frequency:</label><select id="freqZ" onchange="updateEvolutionPlots()"></select></div>
+                    <div><label>Phase Frequency:</label><select id="freqPhase" onchange="updateEvolutionPlots()"></select></div>
+                    <div><label>Resistance Frequency:</label><select id="freqR" onchange="updateEvolutionPlots()"></select></div>
+                    <div><label>Capacitance Frequency:</label><select id="freqC" onchange="updateEvolutionPlots()"></select></div>
+                </div>
+                <button class="button" onclick="updateEvolutionPlots()" style="margin-top: 15px;">Update Plots</button>
+            </div>
+            <div class="loading" id="loadingEvolution"><div class="spinner"></div>Processing data...</div>
+            <div class="plot-grid">
+                <div class="plot-container"><div id="plotEvoZ"></div></div>
+                <div class="plot-container"><div id="plotEvoPhase"></div></div>
+                <div class="plot-container"><div id="plotEvoR"></div></div>
+                <div class="plot-container"><div id="plotEvoC"></div></div>
+            </div>
+
+            <!-- Cell Population (apoptosis sims only) -->
+            <div id="cellPopSection" style="display:none; margin-top:24px;">
+                <h3 style="font-size:1em; margin-bottom:8px; color:#555;">Cell Population Evolution</h3>
+                <div style="margin-bottom:8px; display:flex; flex-wrap:wrap; gap:6px;" id="cellPopToggles">
+                    <button class="button" onclick="toggleCellPop('alive')"  id="btn-pop-alive">Alive</button>
+                    <button class="button" onclick="toggleCellPop('dead')"   id="btn-pop-dead">Dead</button>
+                    <div id="cellPopStageButtons" style="display:contents;"></div>
+                    <button class="button" onclick="toggleCellPop('allApo')" id="btn-pop-allApo">All Apoptosis</button>
+                </div>
+                <div class="plot-container"><div id="plotCellPop"></div></div>
+            </div>
+        </div>
+
+        <!-- SPECTRAL ANALYSIS TAB -->
+        <div id="spectral" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-spectral" tabindex="0">
+            <div class="control-panel">
+                <h3>Spectral Analysis Settings</h3>
+                <div id="spectralChannelSelector" style="margin-bottom: 15px;">
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:5px;">
+                        <label style="font-weight: 600;">Select Channels:</label>
+                        <button class="button" style="padding:2px 8px;font-size:0.78em;margin:0;" onclick="selectAllChannels('spectral')">All</button>
+                        <button class="button" style="padding:2px 8px;font-size:0.78em;margin:0;" onclick="deselectAllChannels('spectral')">None</button>
+                    </div>
+                    <div class="channel-tags" id="spectralChannelTags"></div>
+                </div>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: center; margin-bottom: 15px;">
+                    <label><input type="checkbox" id="showAllTimes" onchange="updateSpectralPlots()"> Show all time points for selected channels</label>
+                    <label><input type="checkbox" id="showBestFit" onchange="updateSpectralPlots()"> Show best-fit simulation (requires classification)</label>
+                    <label><input type="checkbox" id="showSimulations" onchange="toggleSpectralSimFilters(); updateSpectralPlots()"> Overlay filtered simulations</label>
+                </div>
+                <!-- Time slider -->
+                <div class="spectral-sticky-bar" id="spectralStickyBar">
+                    <div style="flex: 1; min-width: 0;">
+                        <label style="font-weight: 600;">Select Time Point:</label>
+                        <div style="display: flex; align-items: center; gap: 15px; margin-top: 10px;">
+                            <button class="button" onclick="previousTimePoint()" style="padding: 8px 15px; margin: 0;" aria-label="Previous time point">&#8592; Prev</button>
+                            <div style="flex: 1; text-align: center;">
+                                <div id="timePointDisplay" style="font-size: 1.2em; font-weight: 600; color: var(--color-interactive); margin-bottom: 2px;">Time: 0.00 h</div>
+                                <div id="fileSpectraCounts" style="font-size: 0.8em; color: var(--color-text-secondary); margin-bottom: 5px;"></div>
+                                <input type="range" id="timeSlider" min="0" max="0" value="0" step="1"
+                                       onchange="updateSpectralPlots()" oninput="updateTimeDisplay()" style="width: 100%;" aria-label="Select time point">
+                                <div style="display: flex; justify-content: space-between; font-size: 0.85em; color: var(--color-text-secondary);">
+                                    <span id="timeSliderMin">0 h</span>
+                                    <span id="timeSliderMax">0 h</span>
+                                </div>
+                            </div>
+                            <button class="button" onclick="nextTimePoint()" style="padding: 8px 15px; margin: 0;" aria-label="Next time point">Next &#8594;</button>
+                        </div>
+                    </div>
+                    <button id="spectralPinBtn"
+                            onclick="toggleSpectralPin()"
+                            title="Pin navigation bar"
+                            style="margin-left:auto; background:none; border:1px solid var(--color-border); border-radius:4px;
+                                   padding:2px 7px; cursor:pointer; font-size:0.85em; color:var(--color-text-secondary); flex-shrink:0;">
+                        Pin
+                    </button>
+                </div>
+                <div id="spectralStickyBarSpacer" style="display:none;"></div>
+                <!-- Simulation filter selectors for spectral overlay -->
+                <div id="spectralSimFilters" style="margin-top: 15px; padding: 15px; background: var(--color-surface-raised); border-radius: 8px; display: none;">
+                    <div style="margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--color-border);">
+                        <label style="font-size: 12px; font-weight: 600; margin-right: 15px;">Sim Types:</label>
+                        <label style="margin-right: 12px;"><input type="checkbox" id="simTypeCov" checked onchange="updateSimCount(); updateSpectralPlots()"> Cov</label>
+                        <label style="margin-right: 12px;"><input type="checkbox" id="simTypeFus" checked onchange="updateSimCount(); updateSpectralPlots()"> Fus</label>
+                        <label style="margin-right: 12px;"><input type="checkbox" id="simTypeWh"  checked onchange="updateSimCount(); updateSpectralPlots()"> WH</label>
+                        <label><input type="checkbox" id="simTypeRan" checked onchange="updateSimCount(); updateSpectralPlots()"> Ran</label>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(6, 1fr) auto; gap: 10px; align-items: end;">
+                        <div>
+                            <label style="font-size: 12px; font-weight: 600;">Alpha (&#x221a;&#x3a9;&#xb7;cm)</label>
+                            <select id="spectralAlpha" onchange="updateSimCount(); updateSpectralPlots()" style="width: 100%; padding: 5px;"></select>
+                        </div>
+                        <div>
+                            <label style="font-size: 12px; font-weight: 600;">Rb (&#x3a9;&#xb7;cm&#xb2;)</label>
+                            <select id="spectralRb" onchange="updateSimCount(); updateSpectralPlots()" style="width: 100%; padding: 5px;"></select>
+                        </div>
+                        <div>
+                            <label style="font-size: 12px; font-weight: 600;">Cm (F/cm&#xb2;)</label>
+                            <select id="spectralCm" onchange="updateSimCount(); updateSpectralPlots()" style="width: 100%; padding: 5px;"></select>
+                        </div>
+                        <div>
+                            <label style="font-size: 12px; font-weight: 600;">Cell Shape</label>
+                            <select id="spectralOverlayShape" onchange="updateSpectralPlots()"
+                                    style="width:100%; padding:4px; border:1px solid var(--color-border); border-radius:4px; font-size:12px;">
+                                <option value="">All</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size: 12px; font-weight: 600;">Electrode (µm)</label>
+                            <select id="spectralOverlayElectrode" onchange="updateSpectralPlots()"
+                                    style="width:100%; padding:4px; border:1px solid var(--color-border); border-radius:4px; font-size:12px;">
+                                <option value="">All</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size: 12px; font-weight: 600;">Max to plot</label>
+                            <input type="number" id="spectralMaxSims" value="50" min="1" max="500"
+                                   onchange="updateSpectralPlots()" style="width: 100%; padding: 5px;">
+                        </div>
+                        <div style="text-align: center; padding: 5px 10px; background: var(--color-info-bg); border-radius: 5px;">
+                            <div style="font-size: 11px; color: var(--color-text-secondary);">Matching</div>
+                            <div id="simMatchCount" style="font-size: 18px; font-weight: bold; color: var(--color-info);">0</div>
+                        </div>
+                    </div>
+                </div>
+                <!-- CPE + GK Model Curves -->
+                <div style="margin-top: 15px; padding: 14px 16px; background: var(--color-surface-raised); border: 1px solid var(--color-border); border-radius: 8px;">
+                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+                        <strong style="color:var(--color-text-primary); font-size:14px;">Model Curves (CPE &amp; GK)</strong>
+                    </div>
+
+                    <!-- CPE Box -->
+                    <div style="background:var(--color-surface); padding:10px 14px; border-radius:6px; border:1px solid var(--color-border); margin-bottom:10px;">
+                        <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+                            <label style="font-weight:600; color:var(--color-text-primary); font-size:13px; min-width:190px;">
+                                <input type="checkbox" id="showCPECurve" onchange="updateSpectralPlots()">
+                                CPE — ZN (naked electrode)
+                            </label>
+                            <label style="font-size:12px;">A <span style="color:var(--color-text-secondary);">[&#x3a9;&#x207b;&#xb9;&#xb7;s&#x207f;]</span>
+                                <input type="text" id="cpeA" value="1e-8"
+                                    style="width:95px;padding:3px 5px;border:1px solid var(--color-border);border-radius:4px;margin-left:4px;"
+                                    onchange="updateSpectralPlots()">
+                            </label>
+                            <label style="font-size:12px;">B <span style="color:var(--color-text-secondary);">[&#x3a9;]</span>
+                                <input type="number" id="cpeB" value="720" step="10"
+                                    style="width:75px;padding:3px 5px;border:1px solid var(--color-border);border-radius:4px;margin-left:4px;"
+                                    onchange="updateSpectralPlots()">
+                            </label>
+                            <label style="font-size:12px;">n
+                                <input type="number" id="cpeN" value="0.9" min="0.01" max="0.99" step="0.01"
+                                    style="width:60px;padding:3px 5px;border:1px solid var(--color-border);border-radius:4px;margin-left:4px;"
+                                    onchange="updateSpectralPlots()">
+                            </label>
+                            <label style="font-size:12px;">Marker
+                                <select id="cpeMarker" onchange="updateSpectralPlots()"
+                                    style="padding:3px 4px;border:1px solid var(--color-border);border-radius:4px;font-size:0.82em;margin-left:4px;">
+                                    <option value="none" selected>&#9675; none</option>
+                                    <option value="circle">&#9679; circle</option>
+                                    <option value="diamond">&#9670; diamond</option>
+                                    <option value="square">&#9632; square</option>
+                                    <option value="triangle-up">&#9650; triangle</option>
+                                    <option value="cross">&#10005; cross</option>
+                                </select>
+                            </label>
+                            <label style="font-size:12px;">Line
+                                <select id="cpeDash" onchange="updateSpectralPlots()"
+                                    style="padding:3px 4px;border:1px solid var(--color-border);border-radius:4px;font-size:0.82em;margin-left:4px;">
+                                    <option value="solid">&#8212; solid</option>
+                                    <option value="dash">- - dash</option>
+                                    <option value="dot" selected>&#xb7;&#xb7;&#xb7; dot</option>
+                                    <option value="dashdot">-&#xb7; dashdot</option>
+                                    <option value="none">&#10005; none</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- GK Curves -->
+                    <div>
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                            <span style="font-weight:600; color:var(--color-text-primary); font-size:13px;">GK Curves</span>
+                            <button class="button" onclick="addGKCurve()"
+                                style="padding:3px 12px; font-size:12px; margin:0;">Add GK Curve</button>
+                            <span style="font-size:11px; color:var(--color-text-secondary);">Uses CPE above as Z<sub>N</sub></span>
+                        </div>
+                        <div id="gkCurvesList">
+                            <div style="color:var(--color-text-disabled);font-size:12px;padding:4px 0;">No GK curves added yet.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="button" onclick="updateSpectralPlots()" style="margin-top: 15px;">Update Plots</button>
+            </div>
+            <div class="plot-grid">
+                <div class="plot-container"><div id="plotSpecZ"></div></div>
+                <div class="plot-container"><div id="plotSpecPhase"></div></div>
+                <div class="plot-container"><div id="plotSpecR"></div></div>
+                <div class="plot-container"><div id="plotSpecC"></div></div>
+            </div>
+        </div>
+
+        <!-- CLASSIFICATION & FITTING TAB -->
+        <div id="fitting" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-fitting" tabindex="0">
+            <div class="control-panel">
+                <h3>Classification Settings</h3>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: center; margin-bottom: 15px;">
+                    <div class="input-row" style="margin: 0;">
+                        <label>Freq Min [Hz]:</label>
+                        <input type="number" id="freq_min" value="100" step="10" style="width: 100px;">
+                    </div>
+                    <div class="input-row" style="margin: 0;">
+                        <label>Freq Max [Hz]:</label>
+                        <input type="number" id="freq_max" value="1000000" step="1000" style="width: 100px;">
+                    </div>
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
+                        <label style="font-weight: 600; margin-right: 4px;">Error Metric:</label>
+                        <label><input type="radio" name="errorMetric" value="rmse"> RMSE</label>
+                        <label><input type="radio" name="errorMetric" value="log_rmse" checked> Log-RMSE</label>
+                        <label><input type="radio" name="errorMetric" value="mae"> MAE</label>
+                        <label><input type="radio" name="errorMetric" value="log_mae"> Log-MAE</label>
+                        <label><input type="radio" name="errorMetric" value="relerr"> Relative Error</label>
+                        <button title="How metrics are calculated" aria-label="Show metric calculation info"
+                                onclick="const p=document.getElementById('metricInfoPanel');p.style.display=p.style.display==='none'?'block':'none';"
+                                style="background:none;border:1.5px solid var(--color-text-secondary);border-radius:50%;width:20px;height:20px;
+                                       cursor:pointer;font-size:12px;font-weight:bold;color:var(--color-text-secondary);padding:0;line-height:1.3;
+                                       flex-shrink:0;">?</button>
+                    </div>
+                    <div id="metricInfoPanel" style="display:none; margin-top:8px; padding:10px 14px; background:var(--color-surface-raised);
+                                                      border-radius:6px; font-size:12px; line-height:1.6;">
+                        <div style="margin-bottom:5px;">
+                            <strong>RMSE</strong> &nbsp;&#x221a;(&#x3a3;(|Z|<sub>sim</sub>&#x2212;|Z|<sub>exp</sub>)&#xb2; / N) —
+                            penalizes large absolute deviations. Sensitive to outliers.
+                        </div>
+                        <div style="margin-bottom:5px;">
+                            <strong>Log-RMSE</strong> &nbsp;&#x221a;(&#x3a3;(log|Z|<sub>sim</sub>&#x2212;log|Z|<sub>exp</sub>)&#xb2; / N) —
+                            scale-invariant; balances contributions across all frequencies. <em>Recommended.</em>
+                        </div>
+                        <div style="margin-bottom:5px;">
+                            <strong>MAE</strong> &nbsp;&#x3a3;||Z|<sub>sim</sub>&#x2212;|Z|<sub>exp</sub>| / N —
+                            linear penalty, more robust to outliers than RMSE.
+                        </div>
+                        <div style="margin-bottom:5px;">
+                            <strong>Log-MAE</strong> &nbsp;&#x3a3;|log|Z|<sub>sim</sub>&#x2212;log|Z|<sub>exp</sub>|| / N —
+                            robust log-scale comparison.
+                        </div>
+                        <div>
+                            <strong>Relative Error</strong> &nbsp;&#x3a3;||Z|<sub>sim</sub>&#x2212;|Z|<sub>exp</sub>| / |Z|<sub>exp</sub> / N —
+                            normalized to experimental magnitude; useful when |Z| spans many orders of magnitude.
+                        </div>
+                        <div style="margin-top:6px; padding-top:6px; border-top:1px solid var(--color-border); font-size:11px; color:var(--color-text-secondary);">
+                            All metrics compare interpolated simulation |Z| vs experimental |Z| (with R<sub>constr</sub> subtracted from exp).
+                            Lower = better fit.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Simulation Type sub-filter (server-side mode only — hidden in file mode) -->
+                <div id="simFiltersPanel" style="display: none; margin-top: 15px; padding: 12px 15px; background: var(--color-surface-raised); border-radius: 8px; border: 1px solid var(--color-border);">
+                    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                        <span style="font-weight: 600; color: var(--color-text-secondary); font-size:13px;">Sim Type (server mode):</span>
+                        <label style="color: var(--color-info);"><input type="checkbox" id="classifyTypeCov" checked class="filter-type"> Cov</label>
+                        <label style="color: var(--color-error);"><input type="checkbox" id="classifyTypeFus" checked class="filter-type"> Fus</label>
+                        <label style="color: var(--color-success);"><input type="checkbox" id="classifyTypeWh"  checked class="filter-type"> WH</label>
+                        <label style="color: var(--color-text-secondary);"><input type="checkbox" id="classifyTypeRan" checked class="filter-type"> Ran</label>
+                        <label style="display:none; color: var(--color-warning);"><input type="checkbox" id="classifyTypeInf" checked class="filter-type"> Inf</label>
+                        <label style="display:none; color: var(--color-text-disabled);"><input type="checkbox" id="classifyTypeRup" checked class="filter-type"> Rup</label>
+                        <span style="font-size:11px; color:var(--color-text-secondary);">— full library, no param pre-filter</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-panel" style="background: var(--color-info-bg); border: 2px solid var(--color-info-border);">
+                <h3>Groupby Classifier</h3>
+                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 12px;">
+                    <label><input type="checkbox" id="enableGrouping" checked onchange="toggleGroupingOptions()"> Enable Groupby Classifier</label>
+                    <span id="groupCountDisplay" style="color: var(--color-success); font-weight: 600;"></span>
+                </div>
+                <div id="groupingOptions">
+                    <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 14px;">
+                        <label><input type="checkbox" id="groupBy_ac"    checked class="groupby-param"> Cell Area (ac)</label>
+                        <label><input type="checkbox" id="groupBy_alpha" checked class="groupby-param"> Alpha (&#x221a;&#x3a9;&#xb7;cm)</label>
+                        <label><input type="checkbox" id="groupBy_rb"    checked class="groupby-param"> Rb</label>
+                        <label><input type="checkbox" id="groupBy_cm"    checked class="groupby-param"> Cm</label>
+                        <label style="border-left: 2px solid var(--color-interactive); padding-left: 10px;">
+                            <input type="checkbox" id="groupBy_type" class="groupby-param"> Sim Type
+                        </label>
+                    </div>
+                    <!-- Evolution Stages sub-panel -->
+                    <div style="background: var(--color-warning-bg); border: 1px solid var(--color-warning-border); border-radius: 6px; padding: 12px;">
+                        <h4 style="color: var(--color-warning); margin: 0 0 6px 0; font-size: 14px;">Evolution Stages</h4>
+                        <p style="font-size: 12px; color: var(--color-text-secondary); margin-bottom: 8px;">
+                            Divide the time evolution into stages. Each stage is classified independently with its own optimal parameter group.
+                        </p>
+                        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 8px;">
+                            <label><input type="checkbox" id="enablePhases" onchange="togglePhasesPanel()"> Enable multi-stage classification</label>
+                            <span id="totalSpectraInfo" style="color: var(--color-text-secondary); font-size: 12px;"></span>
+                        </div>
+                        <div id="phasesContainer" style="display: none;">
+                            <!-- Boundary input mode toggle -->
+                            <div style="display:flex; align-items:center; gap:14px; margin-bottom:10px; padding:6px 10px; background:var(--color-surface); border-radius:5px; border:1px solid var(--color-warning-border);">
+                                <span style="font-size:12px; font-weight:600; color:var(--color-text-secondary);">Define boundaries by:</span>
+                                <label style="font-size:12px; cursor:pointer;">
+                                    <input type="radio" name="stageInputMode" value="index" checked onchange="setStageInputMode('index')"> Spectrum index
+                                </label>
+                                <label style="font-size:12px; cursor:pointer;">
+                                    <input type="radio" name="stageInputMode" value="time" onchange="setStageInputMode('time')"> Time [h]
+                                </label>
+                            </div>
+                            <div id="phasesList"></div>
+                            <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
+                                <button class="button" onclick="addPhase()" style="padding: 4px 12px; font-size: 12px;">Add Stage</button>
+                                <button class="button button-secondary" onclick="removeLastPhase()" style="padding: 4px 12px; font-size: 12px;">Remove Last</button>
+                                <button class="button" onclick="autoDistributePhases()" style="padding: 4px 12px; font-size: 12px; background: var(--color-interactive);">Auto Distribute</button>
+                            </div>
+                            <div id="phaseSummary" style="margin-top: 10px; padding: 8px; background: var(--color-surface); border-radius: 5px; font-size: 12px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-panel">
+                <h3>Channel Selection for Fitting</h3>
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <button class="button" style="padding:2px 8px; font-size:0.78em; margin:0;"
+                            onclick="selectAllChannels('fitting')">All</button>
+                    <button class="button" style="padding:2px 8px; font-size:0.78em; margin:0;"
+                            onclick="deselectAllChannels('fitting')">None</button>
+                </div>
+                <div class="channel-tags" id="fitChannelTags"></div>
+            </div>
+
+            <div class="control-panel">
+                <div style="margin-top: 10px;">
+                    <button class="button button-success" onclick="runClassification()" id="runFitBtn">
+                        Run Classification
+                    </button>
+                    <button class="button button-secondary" onclick="exportResults()">
+                        Export Results
+                    </button>
+                    <select id="csvSeparator" style="padding: 8px; margin-left: 10px; border-radius: 5px;">
+                        <option value=",">Comma (,)</option>
+                        <option value="&#9;">Tab</option>
+                    </select>
+                </div>
+                <div class="loading" id="loadingFitting">
+                    <div class="spinner"></div>
+                    <p id="fittingProgress">Classification in progress...</p>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div id="resultsSection" style="display: none;">
+                <div class="control-panel" style="background: var(--color-success-bg); border: 2px solid var(--color-success-border); margin-bottom: 20px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                        <h3 style="color: var(--color-success); margin: 0;">Best Fit Results</h3>
+                        <span style="font-size: 13px; display: flex; gap: 12px;">
+                            <label style="cursor: pointer; color: var(--color-text-primary);">
+                                <input type="radio" name="bestFitMode" value="general" checked onchange="updateBestFitDisplay()"> General
+                            </label>
+                            <label style="cursor: pointer; color: var(--color-text-primary);">
+                                <input type="radio" name="bestFitMode" value="detail" onchange="updateBestFitDisplay()"> Detail
+                            </label>
+                        </span>
+                    </div>
+                    <div id="bestFitContent" style="display: flex; flex-wrap: wrap; gap: 16px;"></div>
+                </div>
+                <div class="control-panel" style="margin-bottom: 20px;">
+                    <h4 style="margin-bottom: 10px;">Superposition Plot Settings</h4>
+                    <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+                        <div>
+                            <label>Show timepoint: </label>
+                            <select id="superpositionTimepoint" onchange="updateResultsPlots()">
+                                <option value="first">First</option>
+                                <option value="last">Last</option>
+                                <option value="all">All (overlay)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="plot-grid">
+                    <div class="plot-container"><div id="plotDistanceSum"></div></div>
+                    <div class="plot-container"><div id="plotSuperposition"></div></div>
+                </div>
+                <div class="plot-container" style="margin-top: 20px;">
+                    <div style="margin-bottom: 10px; padding: 10px; background: var(--color-surface-raised); border-radius: 5px; display: flex; gap: 20px; flex-wrap: wrap; align-items: center;">
+                        <span style="font-weight: 600;">Show:</span>
+                        <label><input type="checkbox" id="showAlive"       checked onchange="updateCellPopulationPlot()"> Alive</label>
+                        <label><input type="checkbox" id="showDead"        checked onchange="updateCellPopulationPlot()"> Dead</label>
+                        <label><input type="checkbox" id="showOnElectrode" checked onchange="updateCellPopulationPlot()"> On Electrode</label>
+                        <span id="fusedToggleContainer" style="display: none;">
+                            <label><input type="checkbox" id="showFused" checked onchange="updateCellPopulationPlot()"> Fused</label>
+                        </span>
+                        <span id="apoStageTogglesRow" style="display:none;"></span>
+                        <span id="allApoToggleSpan" style="display:none;">
+                            <label><input type="checkbox" id="showAllApo" checked onchange="updateCellPopulationPlot()"> All Apoptosis</label>
+                        </span>
+                    </div>
+                    <div style="margin-top: 8px; padding: 10px; background: var(--color-surface-raised); border-radius: 5px; display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+                        <span style="font-weight: 600;">Figure size:</span>
+                        <select id="cellPopFigsizePreset" onchange="
+                            document.getElementById('cellPopCustomSize').style.display = this.value === 'custom' ? 'flex' : 'none';
+                            updateCellPopulationPlot();
+                        ">
+                            <option value="auto">Auto</option>
+                            <option value="16x5">16 &times; 5 in</option>
+                            <option value="14x5">14 &times; 5 in</option>
+                            <option value="12x5">12 &times; 5 in</option>
+                            <option value="10x5">10 &times; 5 in</option>
+                            <option value="12x6">12 &times; 6 in</option>
+                            <option value="10x6">10 &times; 6 in</option>
+                            <option value="8x6">8 &times; 6 in</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                        <span id="cellPopCustomSize" style="display: none; gap: 8px; align-items: center;">
+                            <label>W: <input type="number" id="cellPopFigsizeW" value="12" min="1" max="40" step="0.5" style="width: 60px;" onchange="updateCellPopulationPlot()"></label>
+                            <label>H: <input type="number" id="cellPopFigsizeH" value="5"  min="1" max="20" step="0.5" style="width: 60px;" onchange="updateCellPopulationPlot()"></label>
+                        </span>
+                    </div>
+                    <div id="plotCellPopulation"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts — app.js and api.js must come before all tabs -->
+    <script src="js/app.js?v=1"></script>
+    <script src="js/utils.js?v=3"></script>
+    <script src="js/api.js?v=1"></script>
+    <script src="js/fileParser.js?v=2"></script>
+    <script src="js/tabs/dataLoading.js?v=4"></script>
+    <script src="js/tabs/combination.js?v=9"></script>
+    <script src="js/tabs/phases.js?v=2"></script>
+    <script src="js/tabs/uiSetup.js?v=2"></script>
+    <script src="js/tabs/evolution.js?v=4"></script>
+    <script src="js/models.js?v=2"></script>
+    <script src="js/tabs/spectral.js?v=4"></script>
+    <script src="js/tabs/classification.js?v=8"></script>
+    <script src="js/help.js?v=1"></script>
+
+    <!-- Contextual Help Modal — populated dynamically by openHelp(key) in help.js -->
+    <div id="helpModalOverlay" class="help-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle">
+        <div class="help-modal-box">
+            <div class="help-modal-header">
+                <span class="help-modal-title" id="helpModalTitle">Help</span>
+                <button class="help-modal-close" onclick="closeHelp()" title="Close" aria-label="Close help">&#x2715;</button>
+            </div>
+            <div class="help-modal-body">
+                <div class="help-modal-image-col">
+                    <!-- image injected by openHelp() -->
+                </div>
+                <div class="help-modal-text-col">
+                    <!-- text injected by openHelp() -->
+                </div>
+            </div>
+            <div class="help-modal-footer">
+                <!-- footer injected by openHelp() -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function toggleSpectralPin() {
+        const bar     = document.getElementById('spectralStickyBar');
+        const spacer  = document.getElementById('spectralStickyBarSpacer');
+        const btn     = document.getElementById('spectralPinBtn');
+        const isPinned = bar.classList.contains('pinned');
+
+        if (isPinned) {
+            bar.classList.remove('pinned');
+            spacer.style.display = 'none';
+            spacer.style.height  = '';
+            btn.textContent = 'Pin';
+            btn.title = 'Pin navigation bar';
+        } else {
+            const h = bar.offsetHeight;
+            bar.classList.add('pinned');
+            spacer.style.height  = h + 'px';
+            spacer.style.display = 'block';
+            btn.textContent = 'Unpin';
+            btn.title = 'Unpin navigation bar';
+        }
+    }
+    </script>
+    <script>
+      // Dark/light mode toggle
+      (function() {
+        const btn = document.getElementById('themeToggle');
+        function getEffective() {
+          return document.documentElement.getAttribute('data-theme') ||
+            (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        }
+        function applyTheme(theme) {
+          document.documentElement.setAttribute('data-theme', theme);
+          localStorage.setItem('ecis-theme', theme);
+          btn.innerHTML = theme === 'dark' ? '&#9728;' : '&#9790;';
+          btn.setAttribute('aria-label', theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+        }
+        // Set initial icon
+        applyTheme(getEffective());
+        btn.addEventListener('click', function() {
+          applyTheme(getEffective() === 'dark' ? 'light' : 'dark');
+        });
+      })();
+    </script>
+</body>
+</html>

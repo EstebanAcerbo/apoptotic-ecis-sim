@@ -1,0 +1,11 @@
+numpy
+scipy
+matplotlib
+tqdm
+joblib
+pandas
+
+# Optional — Intel MKL PARDISO solver (significant speedup for large systems).
+# The code falls back to scipy.sparse.linalg.spsolve automatically if unavailable.
+# Install only if Intel MKL is present on your system (Windows/Linux with MKL).
+# pypardiso

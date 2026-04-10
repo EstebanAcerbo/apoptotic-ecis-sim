@@ -1,0 +1,61 @@
+# ── Python runtime artifacts ────────────────────────────────────────────────
+# Python writes these automatically when it imports a module.
+# They are machine-specific binary caches and have no place in a repo.
+__pycache__/
+*.pyc
+*.pyo
+
+# ── Simulation output ────────────────────────────────────────────────────────
+# The Simulations/ folder contains 3.3 GB of .txt result files.
+# These are distributed separately as Release assets (Step 9), not via git.
+# The zip archives are also excluded so you do not accidentally commit them
+# if you build them inside the repo folder.
+Simulations/
+*.zip
+
+# ── LaTeX source (kept private) ──────────────────────────────────────────────
+# The report PDF is public but the source .tex and bibliography .bib are not.
+# Listing them here ensures they are never staged even if they end up
+# in the repo folder during editing.
+*.tex
+*.bib
+
+# ── LaTeX build artifacts ────────────────────────────────────────────────────
+# When you compile a .tex file, LaTeX generates many auxiliary files
+# (.aux, .bbl, .log, etc.). They are not part of the document and
+# regenerate automatically — no reason to track them.
+*.aux
+*.bbl
+*.bcf
+*.fdb_latexmk
+*.fls
+*.log
+*.run.xml
+*.synctex.gz
+
+# ── Local data and analysis folders ─────────────────────────────────────────
+# These folders exist on your machine but are not part of the public release:
+#   images/      — figures generated during analysis (too large, not essential)
+#   datafiles/   — local processed data files used during development
+#   OldReports/  — draft LaTeX versions, not for public distribution
+#   Bibliography/— PDF papers, not yours to redistribute publicly
+# .csv files are local classification results and logs generated at runtime.
+# .dat files in the root are raw experimental data not included in the release
+# (the one .dat file that IS needed, JoeWCulturedata.dat, lives inside
+# simulation/ and is explicitly staged — this rule does not affect it because
+# git evaluates .gitignore patterns relative to the file's location, and
+# simulation/JoeWCulturedata.dat will be added with `git add simulation/`).
+images/
+datafiles/
+OldReports/
+Bibliography/
+*.csv
+*.dat
+
+# ── Editor and OS metadata ───────────────────────────────────────────────────
+# VS Code stores workspace settings in .vscode/ and Claude Code stores session
+# Thumbs.db and .DS_Store are thumbnail cache files created by Windows and
+# macOS respectively — they are noise in any repository.
+.vscode/
+Thumbs.db
+.DS_Store
